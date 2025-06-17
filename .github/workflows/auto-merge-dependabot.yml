@@ -1,0 +1,98 @@
+name: Auto-merge Dependabot PRs
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+
+jobs:
+  auto-merge:
+    runs-on: ubuntu-latest
+    if: github.actor == 'dependabot[bot]'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Wait for status checks
+        uses: lewagon/wait-on-check-action@v1.3.4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          check-name: 'ci' # Adjust this to match your test job name
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 10
+          allowed-conclusions: success,skipped,neutral
+        continue-on-error: true
+
+      - name: Check if PR is ready for auto-merge
+        id: check-pr
+        run: |
+          # Get PR details
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          
+          # Check if PR is from Dependabot
+          if [[ "${{ github.actor }}" != "dependabot[bot]" ]]; then
+            echo "Not a Dependabot PR, skipping auto-merge"
+            echo "should_merge=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Check if PR is mergeable
+          MERGEABLE=$(gh pr view $PR_NUMBER --json mergeable --jq '.mergeable')
+          if [[ "$MERGEABLE" != "MERGEABLE" ]]; then
+            echo "PR is not mergeable, skipping auto-merge"
+            echo "should_merge=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Check status checks (if any exist)
+          STATUS_CHECKS=$(gh pr view $PR_NUMBER --json statusCheckRollup --jq '.statusCheckRollup[]')
+          if [[ -n "$STATUS_CHECKS" ]]; then
+            FAILED_CHECKS=$(echo "$STATUS_CHECKS" | jq -r 'select(.conclusion == "FAILURE" or .conclusion == "CANCELLED" or .conclusion == "TIMED_OUT") | .name')
+            if [[ -n "$FAILED_CHECKS" ]]; then
+              echo "Some status checks failed:"
+              echo "$FAILED_CHECKS"
+              echo "should_merge=false" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            
+            PENDING_CHECKS=$(echo "$STATUS_CHECKS" | jq -r 'select(.conclusion == null or .conclusion == "PENDING" or .conclusion == "IN_PROGRESS") | .name')
+            if [[ -n "$PENDING_CHECKS" ]]; then
+              echo "Some status checks are still pending:"
+              echo "$PENDING_CHECKS"
+              echo "should_merge=false" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          fi
+          
+          echo "All checks passed, PR is ready for auto-merge"
+          echo "should_merge=true" >> $GITHUB_OUTPUT
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Auto-merge Dependabot PR
+        if: steps.check-pr.outputs.should_merge == 'true'
+        run: |
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          
+          # Enable auto-merge with squash strategy
+          gh pr merge $PR_NUMBER --squash --auto
+          
+          echo "✅ Auto-merge enabled for Dependabot PR #$PR_NUMBER"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add comment on successful auto-merge
+        if: steps.check-pr.outputs.should_merge == 'true'
+        run: |
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          gh pr comment $PR_NUMBER --body "🤖 Auto-merge enabled! This Dependabot PR will be automatically merged once all required checks pass."
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
