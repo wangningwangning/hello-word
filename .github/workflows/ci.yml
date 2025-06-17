@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run basic checks
+        run: |
+          echo "Running basic checks..."
+          
+          # Check if README exists
+          if [[ ! -f "README.md" ]]; then
+            echo "❌ README.md not found"
+            exit 1
+          fi
+          
+          echo "✅ README.md exists"
+          
+          # Add more checks here as your project grows
+          # For example:
+          # - Lint checks
+          # - Unit tests
+          # - Integration tests
+          # - Security scans
+          
+          echo "✅ All checks passed!"
+
+      - name: Validate repository structure
+        run: |
+          echo "Validating repository structure..."
+          
+          # Check for common files
+          if [[ -f "package.json" ]]; then
+            echo "📦 Node.js project detected"
+            # Add Node.js specific checks here
+          fi
+          
+          if [[ -f "requirements.txt" ]] || [[ -f "pyproject.toml" ]]; then
+            echo "🐍 Python project detected"
+            # Add Python specific checks here
+          fi
+          
+          if [[ -f "Gemfile" ]]; then
+            echo "💎 Ruby project detected"
+            # Add Ruby specific checks here
+          fi
+          
+          echo "✅ Repository structure validation complete"
